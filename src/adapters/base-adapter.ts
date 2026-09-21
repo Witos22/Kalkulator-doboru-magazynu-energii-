@@ -28,8 +28,17 @@ export abstract class BaseAdapter {
     return new Promise((resolve, reject) => {
       const results: TimeSeriesRecord[] = [];
       const options = this.getCsvOptions();
-      
+
+      const handleStreamError = (error: NodeJS.ErrnoException): void => {
+        if (error.code === 'ENOENT') {
+          reject(new Error(`Nie znaleziono pliku CSV: ${filePath}`));
+        } else {
+          reject(error);
+        }
+      };
+
       fs.createReadStream(filePath, { encoding: this.getEncoding() })
+        .on('error', handleStreamError)
         .pipe(csvParser(options))
         .on('data', (data: Record<string, string>) => {
           try {
@@ -42,7 +51,7 @@ export abstract class BaseAdapter {
           }
         })
         .on('end', () => resolve(results))
-        .on('error', (error) => reject(error));
+        .on('error', handleStreamError);
     });
   }
 }

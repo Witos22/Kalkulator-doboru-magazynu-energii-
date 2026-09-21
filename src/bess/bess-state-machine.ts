@@ -6,10 +6,8 @@ import { halfRoundTripEfficiency, STEP_DURATION_H } from "../utils/energy-math.j
  */
 export class BessStateMachine {
   private config: BessConfig;
-  private nominalCapacityKwh: number;
   private currentUsableCapacityKwh: number;
   private socKwh: number;
-  private cycleEnergyKwh: number;
 
   /**
    * Initializes a new battery state machine.
@@ -17,10 +15,8 @@ export class BessStateMachine {
    */
   constructor(config: BessConfig) {
     this.config = config;
-    this.nominalCapacityKwh = config.product.usableCapacityKwh * config.moduleCount;
-    this.currentUsableCapacityKwh = this.nominalCapacityKwh;
+    this.currentUsableCapacityKwh = config.product.usableCapacityKwh * config.moduleCount;
     this.socKwh = this.currentUsableCapacityKwh * 0.5; // Initial SoC = 50%
-    this.cycleEnergyKwh = 0;
   }
 
   /**
@@ -55,8 +51,7 @@ export class BessStateMachine {
     }
 
     this.socKwh += actualInternalAdded;
-    this.cycleEnergyKwh += actualInternalAdded;
-    
+
     // External energy drawn (before efficiency losses)
     const externalChargedKwh = actualInternalAdded / eff;
 
@@ -127,36 +122,4 @@ export class BessStateMachine {
     };
   }
 
-  /**
-   * Gets the total number of equivalent full cycles.
-   * @returns Computed number of cycles
-   */
-  public getCycles(): number {
-    return this.currentUsableCapacityKwh > 0 
-      ? this.cycleEnergyKwh / this.currentUsableCapacityKwh 
-      : 0;
-  }
-
-  /**
-   * Applies annual degradation to reduce the usable capacity.
-   * @param year The current year of operation
-   */
-  public applyAnnualDegradation(year: number): void {
-    const degradationFactor = Math.pow(1 - this.config.product.degradationPerYear, year);
-    this.currentUsableCapacityKwh = this.nominalCapacityKwh * degradationFactor;
-    
-    // Ensure SoC doesn't exceed the newly degraded capacity
-    if (this.socKwh > this.currentUsableCapacityKwh) {
-      this.socKwh = this.currentUsableCapacityKwh;
-    }
-  }
-
-  /**
-   * Resets the battery to its initial state.
-   */
-  public reset(): void {
-    this.currentUsableCapacityKwh = this.nominalCapacityKwh;
-    this.socKwh = this.currentUsableCapacityKwh * 0.5;
-    this.cycleEnergyKwh = 0;
-  }
 }
