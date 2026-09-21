@@ -1,5 +1,29 @@
 import type { PvgisResponse, PvProfileRecord } from '../types/pvgis.js';
 
+/**
+ * Converts a UTC instant to the equivalent local wall-clock time in Poland,
+ * using the IANA timezone database (handles CET/CEST transitions correctly)
+ * instead of manually re-implementing DST rules.
+ */
+function utcToWarsawWallClock(utcDate: Date): Date {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Europe/Warsaw',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(utcDate);
+
+  const get = (type: string): number => Number(parts.find((p) => p.type === type)?.value ?? 0);
+
+  // formatToParts may report hour as "24" for midnight — normalize to 0.
+  const hour = get('hour') % 24;
+
+  return new Date(Date.UTC(get('year'), get('month') - 1, get('day'), hour, get('minute')));
+}
+
 export class PvgisClient {
   private readonly BASE_URL = 'https://re.jrc.ec.europa.eu/api/v5_3/seriescalc';
 
@@ -49,22 +73,10 @@ export class PvgisClient {
 
       // We parse the UTC time
       const utcDate = new Date(Date.UTC(year, month, day, hour, minute));
-      
-      // Determine DST offset for Poland (CET = +1, CEST = +2)
-      // DST starts last Sunday of March at 01:00 UTC
-      const march31 = new Date(Date.UTC(year, 2, 31));
-      const lastSundayMarch = new Date(Date.UTC(year, 2, 31 - march31.getUTCDay(), 1));
-      
-      // DST ends last Sunday of October at 01:00 UTC
-      const oct31 = new Date(Date.UTC(year, 9, 31));
-      const lastSundayOct = new Date(Date.UTC(year, 9, 31 - oct31.getUTCDay(), 1));
 
-      const isDst = utcDate >= lastSundayMarch && utcDate < lastSundayOct;
-      const offsetHours = isDst ? 2 : 1;
+      // Convert to local Polish wall-clock time (handles CET/CEST via IANA tzdata)
+      const localWallClockMs = utcToWarsawWallClock(utcDate).getTime();
 
-      // Calculate local wall-clock time in ms
-      const localWallClockMs = utcDate.getTime() + offsetHours * 3600 * 1000;
-      
       // We divide PV output in Watts by 1000 to get kW
       const pvProductionKw = record.P / 1000;
 

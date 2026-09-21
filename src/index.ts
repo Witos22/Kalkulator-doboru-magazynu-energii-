@@ -24,6 +24,8 @@ interface CliArgs {
   contractedPowerKw: number;
   existingPvKwp: number | null;
   outputPath: string | null;
+  tilt: number | null;
+  azimuth: number | null;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -44,17 +46,42 @@ function parseArgs(argv: string[]): CliArgs {
     process.exit(1);
   }
 
+  const lat = parseFloat(parsed["lat"] ?? "52.23");
+  const lon = parseFloat(parsed["lon"] ?? "21.01");
+  const contractedPowerKw = parseFloat(parsed["contracted-power"] ?? "10");
+  const existingPvKwp = parsed["existing-pv"] !== undefined
+    ? parseFloat(parsed["existing-pv"])
+    : null;
+  const tilt = parsed["tilt"] !== undefined ? parseFloat(parsed["tilt"]) : null;
+  const azimuth = parsed["azimuth"] !== undefined ? parseFloat(parsed["azimuth"]) : null;
+
+  const numericChecks: Array<[string, number | null]> = [
+    ["--lat", lat],
+    ["--lon", lon],
+    ["--contracted-power", contractedPowerKw],
+    ["--existing-pv", existingPvKwp],
+    ["--tilt", tilt],
+    ["--azimuth", azimuth],
+  ];
+  for (const [flag, value] of numericChecks) {
+    if (value !== null && Number.isNaN(value)) {
+      console.error(`❌ Nieprawidłowa wartość liczbowa dla flagi ${flag}.`);
+      printUsage();
+      process.exit(1);
+    }
+  }
+
   return {
     csvPath,
     adapter: (parsed["adapter"] as "tauron" | "sems") ?? "tauron",
     tariff: (parsed["tariff"] as TariffType) ?? "G11",
-    lat: parseFloat(parsed["lat"] ?? "52.23"),
-    lon: parseFloat(parsed["lon"] ?? "21.01"),
-    contractedPowerKw: parseFloat(parsed["contracted-power"] ?? "10"),
-    existingPvKwp: parsed["existing-pv"] !== undefined
-      ? parseFloat(parsed["existing-pv"])
-      : null,
+    lat,
+    lon,
+    contractedPowerKw,
+    existingPvKwp,
     outputPath: parsed["output"] ?? null,
+    tilt,
+    azimuth,
   };
 }
 
@@ -72,6 +99,7 @@ USAGE:
     --lat 52.23 --lon 21.01 \\
     --contracted-power 10 \\
     [--existing-pv 6.5] \\
+    [--tilt 35 --azimuth 180] \\
     [--output ./raport.json]
 
 OPTIONS:
@@ -81,7 +109,10 @@ OPTIONS:
   --lat               Szerokość geograficzna (domyślnie: 52.23 = Warszawa)
   --lon               Długość geograficzna (domyślnie: 21.01)
   --contracted-power  Moc umowna [kW] (domyślnie: 10)
-  --existing-pv       Istniejąca moc PV [kWp] — pomiń jeśli brak PV
+  --existing-pv       Istniejąca moc PV [kWp] — pomiń jeśli brak PV (wymaga --adapter sems)
+  --tilt              Kąt nachylenia paneli PV [°] — wymaga podania razem z --azimuth
+                      (domyślnie: PVGIS dobiera kąt optymalny)
+  --azimuth           Azymut/orientacja paneli PV [°, 180 = południe] — wymaga --tilt
   --output            Ścieżka do pliku wyjściowego JSON (opcjonalnie)
 `);
 }
@@ -91,6 +122,18 @@ OPTIONS:
 async function main(): Promise<void> {
   const args = parseArgs(process.argv);
 
+  if (args.adapter === "tauron" && args.existingPvKwp !== null) {
+    console.error(
+      "❌ Nieprawidłowa kombinacja: --adapter tauron razem z --existing-pv.\n" +
+      "   Dane z licznika OSD (Tauron) dla obiektu z już istniejącym PV są\n" +
+      "   rozliczane netto (po autokonsumpcji), więc nie da się ich poprawnie\n" +
+      "   połączyć z osobno symulowaną produkcją PV z PVGIS — wynik byłby błędny\n" +
+      "   (podwójne uwzględnienie efektu istniejącej instalacji).\n" +
+      "   Dla obiektu z PV użyj: --adapter sems z danymi z monitoringu falownika."
+    );
+    process.exit(1);
+  }
+
   console.log("🔌 Kalkulator Magazynu Energii");
   console.log("─".repeat(50));
   console.log(`📂 CSV: ${args.csvPath}`);
@@ -98,7 +141,11 @@ async function main(): Promise<void> {
   console.log(`💰 Taryfa: ${args.tariff}`);
   console.log(`📍 Lokalizacja: ${args.lat}, ${args.lon}`);
   console.log(`⚡ Moc umowna: ${args.contractedPowerKw} kW`);
-  console.log(`☀️  Istniejące PV: ${args.existingPvKwp !== null ? args.existingPvKwp + " kWp" : "brak"}`);
+  if (args.existingPvKwp !== null) {
+    console.log(`☀️  Istniejące PV: ${args.existingPvKwp} kWp`);
+  } else {
+    console.log(`☀️  Istniejące PV: brak — program dobierze optymalny rozmiar instalacji PV (skan 3–15 kWp)`);
+  }
   console.log("─".repeat(50));
 
   // --- 1. Parsowanie CSV ---
@@ -138,12 +185,17 @@ async function main(): Promise<void> {
     // Pobieramy profil PV z PVGIS dla 1 kWp (potem skalujemy)
     console.log("\n☀️  Pobieranie profilu PV z PVGIS API (1 kWp)...");
     const pvgis = new PvgisClient();
+    const pvgisOptions = args.tilt !== null && args.azimuth !== null
+      ? { tilt: args.tilt, azimuth: args.azimuth }
+      : undefined;
     try {
-      pvBaseProfile = await pvgis.fetchPvProfile(args.lat, args.lon, 1);
+      pvBaseProfile = await pvgis.fetchPvProfile(args.lat, args.lon, 1, pvgisOptions);
       console.log(`   ✅ Pobrano ${pvBaseProfile.length} rekordów PV (15-min)`);
     } catch (error) {
-      console.error(`   ❌ Błąd PVGIS: ${error instanceof Error ? error.message : String(error)}`);
-      console.log("   ⚠️  Kontynuuję bez danych PV (symulacja bez produkcji PV)");
+      console.error(`❌ Błąd pobierania danych PV z PVGIS: ${error instanceof Error ? error.message : String(error)}`);
+      console.error("   Bez profilu produkcji PV analiza PV+magazynu byłaby błędna (zerowa produkcja PV).");
+      console.error("   Sprawdź współrzędne (--lat/--lon) i połączenie z internetem, po czym spróbuj ponownie.");
+      process.exit(1);
     }
   }
 
@@ -172,9 +224,12 @@ async function main(): Promise<void> {
   };
 
   // --- 4. Skanowanie scenariuszy ---
-  const totalScenarios = pvSizesToTest.length * products.length *
-    products.reduce((sum, p) => sum + p.maxModules, 0);
-  console.log(`\n🔍 Skanowanie ${totalScenarios} scenariuszy (${pvSizesToTest.length} PV × ${products.length} BESS)...`);
+  const totalBessConfigs = products.reduce((sum, p) => sum + p.maxModules, 0);
+  const totalScenarios = pvSizesToTest.length * totalBessConfigs;
+  console.log(
+    `\n🔍 Skanowanie ${totalScenarios} scenariuszy ` +
+    `(${pvSizesToTest.length} PV × ${totalBessConfigs} konfiguracji magazynu z ${products.length} produktów)...`
+  );
 
   const scanner = new ScenarioScanner(strategy, financialConfig);
   const report = scanner.scan(loadProfile, pvBaseProfile, {
@@ -248,6 +303,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error) => {
-  console.error("❌ Błąd krytyczny:", error);
+  console.error(`❌ Błąd krytyczny: ${error instanceof Error ? error.message : String(error)}`);
   process.exit(1);
 });
