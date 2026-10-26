@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nivato — Kalkulator magazynu energii</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="header">
+      <img class="logo-mark" src="logo.svg" alt="Nivato" />
+      <div class="logo-text">
+        <span class="brand-name">nivato</span>
+        <span class="brand-sub">energia</span>
+      </div>
+    </header>
+    <section class="hero">
+      <span class="eyebrow">Kalkulator</span>
+      <h1>Kalkulator magazynu energii</h1>
+      <p>Sprawdź, jaki magazyn energii najlepiej dopasować do Twojego domu lub firmy — na podstawie realnych danych z licznika, z uwzględnieniem ewentualnej rozbudowy instalacji PV.</p>
+    </section>
+
+    <form id="calc-form" class="card">
+      <h2>Twoje dane</h2>
+      <p class="card-desc">Wybierz swoją sytuację i uzupełnij dane, żeby dobrać optymalny magazyn energii.</p>
+
+      <div class="path-selector">
+        <label class="path-option active" data-path="tauron">
+          <input type="radio" name="path" value="tauron" checked />
+          Nie mam PV
+        </label>
+        <label class="path-option" data-path="moj-licznik">
+          <input type="radio" name="path" value="moj-licznik" />
+          Mam PV
+        </label>
+        <label class="path-option" data-path="firma-15min">
+          <input type="radio" name="path" value="firma-15min" />
+          Firma 
+        </label>
+      </div>
+
+      <!-- Pliki: brak PV / firma -->
+      <div class="field-grid" data-group="csv-simple">
+        <div class="field">
+          <label for="csv-file">Plik z danymi (CSV/XLSX)</label>
+          <input type="file" id="csv-file" name="csv" accept=".csv,.xlsx,.xls" />
+        </div>
+      </div>
+
+      <!-- Deklaracja zużycia (bez plików): brak PV -->
+      <div class="field-grid" data-group="declared-consumption">
+        <div class="field">
+          <label for="annual-consumption">Roczne zużycie energii z sieci [kWh]</label>
+          <input type="number" step="any" min="0" id="annual-consumption" name="annualConsumptionKwh" placeholder="np. 4500" />
+        </div>
+        <div class="field">
+          <label>Odbiorniki</label>
+          <div class="checkbox-group">
+            <label><input type="checkbox" class="appliance" value="heat-pump" /> Pompa ciepła</label>
+            <label><input type="checkbox" class="appliance" value="ev" /> Ładowarka EV</label>
+            <label><input type="checkbox" class="appliance" value="ac" /> Klimatyzacja</label>
+            <label><input type="checkbox" class="appliance" value="boiler" /> Bojler elektryczny</label>
+            <label><input type="checkbox" class="appliance" value="remote-work" /> Praca zdalna w domu</label>
+          </div>
+        </div>
+      </div>
+      <p class="card-desc" data-group="declared-note" style="margin-top:4px;">
+        Bez pliku z danymi z licznika kalkulator buduje profil zużycia z deklaracji (roczne zużycie i odbiorniki). Wynik jest wtedy mniej dokładny — raport pokaże poziom niepewności.
+      </p>
+
+      <!-- Pliki: moj-licznik (dane dobowe A+/A-) -->
+      <div class="field-grid" data-group="moj-licznik-files" style="display:none;">
+        <div class="field">
+          <label for="csv-a-plus">Raporty dobowe "Pobór A+" <span class="hint">(12 plików, jeden na miesiąc)</span></label>
+          <input type="file" id="csv-a-plus" name="csvAPlus" accept=".xls,.xlsx" multiple />
+        </div>
+        <div class="field">
+          <label for="csv-a-minus">Raporty dobowe "Energia oddana A-" <span class="hint">(12 plików, jeden na miesiąc)</span></label>
+          <input type="file" id="csv-a-minus" name="csvAMinus" accept=".xls,.xlsx" multiple />
+        </div>
+      </div>
+
+      <div data-group="pv-fields" style="display:none;">
+        <div class="section-label">Instalacja PV</div>
+        <div id="installations-list"></div>
+        <button type="button" id="add-installation-btn" class="secondary-btn">+ Dodaj instalację</button>
+
+        <div class="field-grid" style="margin-top:16px;">
+          <div class="field">
+            <label for="settlement-system">System rozliczeń PV</label>
+            <select id="settlement-system" name="settlementSystem">
+              <option value="net-billing" selected>Net-billing (od 04.2022)</option>
+              <option value="opusty">Opusty (sprzed 04.2022)</option>
+            </select>
+          </div>
+        </div>
+        <p class="card-desc" id="settlement-system-hint" style="display:none; margin-top:8px;"></p>
+        <p class="card-desc" id="settlement-system-warning" style="display:none; margin-top:8px;">
+          Opusty: oddana energia to kredyt w kWh (odbiór 80% dla instalacji do 10 kW, 70% powyżej), nie pieniądze. Sieć działa jak darmowy magazyn, więc fizyczny magazyn ma tu zwykle bardzo małą wartość — kalkulator policzy to wprost (bilans roczny per strefa, bez ładowania z sieci).
+        </p>
+      </div>
+
+      <div class="section-label">Lokalizacja i taryfa</div>
+      <div class="field-grid">
+        <div class="field field--city-search">
+          <label for="city-search">Miejscowość</label>
+          <div class="city-search-wrapper">
+            <input type="text" id="city-search" placeholder="np. Wrocław" autocomplete="off" spellcheck="false" />
+            <div id="city-dropdown" class="city-dropdown" role="listbox"></div>
+          </div>
+          <input type="hidden" id="lat" name="lat" />
+          <input type="hidden" id="lon" name="lon" />
+          <input type="hidden" id="city-name" name="cityName" />
+        </div>
+        <div class="field">
+          <label for="tariff">Taryfa obecna</label>
+          <select id="tariff" name="tariff">
+            <option value="G11">G11</option>
+            <option value="G12" selected>G12</option>
+            <option value="G12w">G12w</option>
+            <option value="G13">G13</option>
+          </select>
+        </div>
+        <div class="field field--checkbox" data-group="house-vat">
+          <label class="checkbox-inline" for="house-under-300">
+            <input type="checkbox" id="house-under-300" name="houseUnder300m2" value="1" checked />
+            Dom do 300 m²
+          </label>
+        </div>
+      </div>
+
+      <details class="advanced" id="advanced-panel">
+        <summary>
+          Zaawansowane
+          <span class="advanced-hint" id="advanced-hint">kąt 35°, azymut 180°, 3 fazy (14 kW), eksport 0,30 zł/kWh</span>
+        </summary>
+        <div class="advanced-body">
+          <p class="card-desc">Wartości domyślne. Zostaw je, jeśli nie znasz dokładniejszych danych z dachu, umowy albo faktury.</p>
+
+          <div class="field-grid" data-group="global-geometry">
+            <div class="field">
+              <label for="tilt">Kąt nachylenia PV [°]</label>
+              <input type="number" step="any" id="tilt" name="tilt" value="35" />
+            </div>
+            <div class="field">
+              <label for="azimuth">Azymut [°] <span class="hint">(180 = południe)</span></label>
+              <input type="number" step="any" id="azimuth" name="azimuth" value="180" />
+            </div>
+          </div>
+
+          <div id="installations-advanced" data-group="pv-advanced" style="display:none;"></div>
+
+          <div class="field-grid">
+            <div class="field">
+              <label for="target-tariff">Taryfa docelowa</label>
+              <select id="target-tariff" name="targetTariff">
+                <option value="" selected>Bez zmiany (jak obecna)</option>
+                <option value="G11">G11</option>
+                <option value="G12">G12</option>
+                <option value="G12w">G12w</option>
+                <option value="G13">G13</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="phases">Liczba faz przyłącza</label>
+              <select id="phases" name="phases">
+                <option value="1">1 faza</option>
+                <option value="3" selected>3 fazy</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="grid-connection">Moc przyłączeniowa [kW]</label>
+              <input type="number" step="0.01" min="0" id="grid-connection" name="gridConnectionPowerKw" value="14" />
+              <span class="hint" id="connection-power-hint">Domyślnie 14 kW dla 3 faz. Wpisz moc z umowy, jeśli jest inna.</span>
+            </div>
+            <div class="field">
+              <label for="export-limit">Limit eksportu [kW]</label>
+              <input type="number" step="0.01" min="0" id="export-limit" name="exportLimitKw" value="14" />
+            </div>
+            <div class="field">
+              <label for="export-price">Wartość eksportu do sieci [zł/kWh]</label>
+              <input type="number" step="0.01" min="0" id="export-price" name="exportPricePerKwh" value="0.30" />
+            </div>
+          </div>
+
+          <div class="field" data-group="pv-advanced" style="display:none; margin-bottom:16px;">
+            <label for="inverter-production">Dane z monitoringu falownika <span class="hint">(wkrótce, na razie nieaktywne)</span></label>
+            <input type="file" id="inverter-production" name="inverterProduction" accept=".xls,.xlsx,.csv" disabled />
+          </div>
+
+          <p class="card-desc" style="margin-top:4px;">
+            Stawki taryfy — wartości domyślne są orientacyjne. Podaj własne z faktury, jeśli je znasz.
+            Dla taryf wielostrefowych (G12/G12w/G13) magazyn dodatkowo dogrywa się z sieci w najtańszej strefie, jeśli to się opłaca.
+          </p>
+          <table>
+            <thead>
+              <tr>
+                <th>Strefa</th>
+                <th>Cena energii — sprzedawca [zł/kWh]</th>
+                <th>Stawka dystrybucyjna — OSD [zł/kWh]</th>
+                <th>Razem [zł/kWh]</th>
+              </tr>
+            </thead>
+            <tbody id="tariff-price-table-body"></tbody>
+          </table>
+          <p class="card-desc" id="tariff-price-source" style="margin-top:8px;"></p>
+        </div>
+      </details>
+
+      <button type="submit" class="submit-btn">Analizuj</button>
+    </form>
+
+    <div id="status-container"></div>
+
+    <div id="results" class="card">
+      <h2>Wyniki kalkulacji</h2>
+      <p class="card-desc">Rekomendowana konfiguracja i porównanie z wariantem bazowym.</p>
+      <div id="assumptions-section" style="display:none;">
+        <h3 class="subsection-title">Założenia</h3>
+        <ul id="assumptions-list" class="assumptions-list"></ul>
+      </div>
+      <div id="data-source-note" class="status-msg loading" style="display:none;"></div>
+      <div id="validation-warnings" class="status-msg error" style="display:none;"></div>
+      <div id="inverter-clipping-note" class="status-msg loading" style="display:none;"></div>
+      <div id="power-limit-note" class="status-msg loading" style="display:none;"></div>
+      <div id="data-quality-warning" class="status-msg error" style="display:none;"></div>
+      <div id="settlement-note" class="status-msg loading" style="display:none;"></div>
+
+      <div class="results-grid" id="results-stats"></div>
+
+      <table id="results-table">
+        <thead>
+          <tr>
+            <th>Konfiguracja</th>
+            <th>PV [kWp]</th>
+            <th>Autokonsumpcja</th>
+            <th>Pobór z sieci</th>
+            <th>Cykli/rok</th>
+            <th>Koszt</th>
+            <th>Payback</th>
+          </tr>
+        </thead>
+        <tbody id="results-table-body"></tbody>
+      </table>
+
+      <div class="recommendation-text" id="recommendation-text"></div>
+
+      <div class="recommendation-text" id="tariff-change-box" style="display:none;"></div>
+
+      <div class="recommendation-text" id="pv-only-box" style="display:none;"></div>
+
+      <h3 class="subsection-title">Ranking wg NPV (wartość netto w horyzoncie analizy)</h3>
+      <p class="card-desc" id="npv-ranking-note">Ranking po okresie zwrotu faworyzuje najmniejszy magazyn. NPV pokazuje, który wariant daje najwięcej wartości netto (po odjęciu inwestycji i ewentualnej wymiany).</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Konfiguracja</th>
+            <th>PV [kWp]</th>
+            <th>Koszt</th>
+            <th>Payback</th>
+            <th>NPV</th>
+          </tr>
+        </thead>
+        <tbody id="npv-ranking-body"></tbody>
+      </table>
+
+      <div id="sensitivity-section" style="display:none;">
+        <h3 class="subsection-title">Wrażliwość wyniku na założenia</h3>
+        <p class="card-desc" id="sensitivity-desc"></p>
+        <div id="sensitivity-rows" class="tornado"></div>
+      </div>
+
+      <h3 class="subsection-title" id="manufacturer-table-title">Najlepszy magazyn każdego producenta</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Producent</th>
+            <th>Konfiguracja</th>
+            <th>PV [kWp]</th>
+            <th>Koszt</th>
+            <th>Oszczędności/rok</th>
+            <th>Cykli/rok</th>
+            <th>Payback</th>
+          </tr>
+        </thead>
+        <tbody id="manufacturer-table-body"></tbody>
+      </table>
+
+      <div id="charts-section" style="display:none;">
+        <div class="chart-resolution-toggle">
+          <button type="button" class="chart-resolution-btn active" data-resolution="monthly">Miesiąc</button>
+          <button type="button" class="chart-resolution-btn" data-resolution="daily">Dzień</button>
+        </div>
+
+        <h3 class="subsection-title" id="chart-zone-breakdown-title">Realny pobór i oddanie — strefa 1 i strefa 2 (miesięcznie)</h3>
+        <div style="position:relative; height:320px; margin-top:12px;">
+          <canvas id="chart-zone-breakdown"></canvas>
+        </div>
+
+        <div id="chart-pv-usage-section">
+          <h3 class="subsection-title" id="chart-pv-usage-title">Wykorzystanie produkcji PV z magazynem (miesięcznie)</h3>
+          <p class="card-desc">Część wspólna poboru i oddania w tym samym czasie to energia, którą przechwytuje magazyn zamiast oddawać ją do sieci.</p>
+          <div style="position:relative; height:320px; margin-top:12px;">
+            <canvas id="chart-pv-usage"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <p class="disclaimer">Wyniki mają charakter orientacyjny. Ostateczny dobór parametrów wymaga weryfikacji przez uprawnionego projektanta.</p>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script src="cities.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

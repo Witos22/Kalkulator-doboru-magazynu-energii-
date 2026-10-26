@@ -44,6 +44,8 @@ export class SimulationEngine {
     const stepCount = timeSeries.length;
     const steps: SimulationStepResult[] = new Array<SimulationStepResult>(stepCount);
 
+    this.strategy.prepare?.(timeSeries, pvScaleFactor);
+
     // --- Główna pętla symulacji ---
     for (let i = 0; i < stepCount; i++) {
       const record = timeSeries[i]!;
@@ -81,6 +83,7 @@ export class SimulationEngine {
     let totalSelfConsumedKwh = 0;
     let totalGridImportKwh = 0;
     let totalGridExportKwh = 0;
+    let totalCurtailedKwh = 0;
     let totalBessChargedKwh = 0;
     let totalBessDischargedKwh = 0;
     let peakGridImportKw = 0;
@@ -95,6 +98,7 @@ export class SimulationEngine {
       totalSelfConsumedKwh += step.selfConsumedKwh;
       totalGridImportKwh += step.gridImportKwh;
       totalGridExportKwh += step.gridExportKwh;
+      totalCurtailedKwh += step.curtailedKwh ?? 0;
       totalBessChargedKwh += step.bessChargedKwh;
       totalBessDischargedKwh += step.bessDischargedKwh;
 
@@ -136,12 +140,14 @@ export class SimulationEngine {
       : 0;
 
     // --- Wskaźniki procentowe ---
+    // Autokonsumpcja = część produkcji PV niewyeksportowana do sieci (zużyta na
+    // bieżąco lub zmagazynowana). Magazyn nie eksportuje, więc eksport to wyłącznie PV.
     const selfConsumptionRate = totalPvProductionKwh > 0
-      ? (totalSelfConsumedKwh / totalPvProductionKwh) * 100
+      ? Math.max(0, (1 - (totalGridExportKwh + totalCurtailedKwh) / totalPvProductionKwh)) * 100
       : 0;
 
     const autarkyRate = totalLoadKwh > 0
-      ? ((totalSelfConsumedKwh + totalBessDischargedKwh) / totalLoadKwh) * 100
+      ? Math.max(0, (1 - totalGridImportKwh / totalLoadKwh)) * 100
       : 0;
 
     return {
@@ -152,6 +158,7 @@ export class SimulationEngine {
       totalSelfConsumedKwh,
       totalGridImportKwh,
       totalGridExportKwh,
+      totalCurtailedKwh,
       totalBessChargedKwh,
       totalBessDischargedKwh,
       selfConsumptionRate,

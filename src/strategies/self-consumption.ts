@@ -58,7 +58,7 @@ export class SelfConsumptionStrategy implements ISimulationStrategy {
       // Perfect balance: PV production exactly matches load
       selfConsumedKwh = loadKwh;
     }
-    
+
     return {
       timestamp: record.timestamp,
       loadKw: record.loadKw,
@@ -67,6 +67,8 @@ export class SelfConsumptionStrategy implements ISimulationStrategy {
       gridImportKwh,
       gridExportKwh,
       bessChargedKwh,
+      bessChargedFromPvKwh: bessChargedKwh,
+      bessChargedFromGridKwh: 0,
       bessDischargedKwh,
       bessState: bess !== null ? bess.getState() : null
     };

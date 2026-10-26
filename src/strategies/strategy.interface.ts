@@ -7,6 +7,14 @@ import type { SimulationConfig, SimulationStepResult } from "../types/simulation
  */
 export interface ISimulationStrategy {
   /**
+   * Opcjonalny przebieg wstępny przed pętlą symulacji — pozwala strategii
+   * zajrzeć w profil roku (np. prognoza nadwyżki PV na kolejne dni).
+   * @param timeSeries Pełny profil roku
+   * @param pvScaleFactor Współczynnik skalowania PV stosowany przez silnik
+   */
+  prepare?(timeSeries: readonly TimeSeriesRecord[], pvScaleFactor: number): void;
+
+  /**
    * Executes a single step of the simulation.
    * @param record The time series record for the current interval
    * @param bess The battery state machine instance (null if no battery)
