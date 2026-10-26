@@ -1,5 +1,6 @@
 import type { BessConfig, BessState, BessStepResult } from "../types/bess.js";
 import { halfRoundTripEfficiency, STEP_DURATION_H } from "../utils/energy-math.js";
+import { bessPowerKw } from "./bess-power.js";
 
 /**
  * Battery state machine handling BESS physics, limits, and degradation.
@@ -25,7 +26,7 @@ export class BessStateMachine {
    * @returns Result containing actual charged energy and new state
    */
   public charge(requestedKwh: number): BessStepResult {
-    const totalMaxPowerKw = this.config.product.maxChargePowerKw * this.config.moduleCount;
+    const totalMaxPowerKw = bessPowerKw(this.config.product, this.config.moduleCount, this.config.inverterBatteryKw);
     const maxKwhPerStep = totalMaxPowerKw * STEP_DURATION_H;
     
     // Limit by power
@@ -69,7 +70,7 @@ export class BessStateMachine {
    * @returns Result containing actual discharged energy and new state
    */
   public discharge(requestedKwh: number): BessStepResult {
-    const totalMaxPowerKw = this.config.product.maxDischargePowerKw * this.config.moduleCount;
+    const totalMaxPowerKw = bessPowerKw(this.config.product, this.config.moduleCount, this.config.inverterBatteryKw);
     const maxKwhPerStep = totalMaxPowerKw * STEP_DURATION_H;
     
     // Limit by power
@@ -80,12 +81,16 @@ export class BessStateMachine {
     const internalEnergyRemoved = powerLimitedKwh / eff;
     
     // Limit by Depth of Discharge (DoD)
-    const minSocKwh = this.currentUsableCapacityKwh * (1 - this.config.product.dodPercent / 100);
+    // DoD NIE jest tu stosowane drugi raz (I3 audytu 30.09.2026): `usableCapacityKwh`
+    // z katalogu to już pojemność UŻYTECZNA (po odjęciu rezerwy DoD), więc cała
+    // energia powyżej 0 kWh tej pojemności jest dostępna do rozładowania. Wcześniej
+    // odejmowano jeszcze rezerwę (1 − dodPercent), co dla produktu z DoD < 100%
+    // zaniżyłoby magazyn podwójnie.
+    const minSocKwh = 0;
     const availableEnergyKwh = Math.max(0, this.socKwh - minSocKwh);
     
     let actualInternalRemoved = internalEnergyRemoved;
     let clipped = false;
-    
     if (actualInternalRemoved > availableEnergyKwh) {
       actualInternalRemoved = availableEnergyKwh;
       clipped = true;

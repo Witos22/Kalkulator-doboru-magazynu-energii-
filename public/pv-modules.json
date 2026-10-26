@@ -1,0 +1,35 @@
+[
+  {
+    "id": "longi-lr5-54hth-420m",
+    "manufacturer": { "value": "LONGi", "source": "https://static.longi.com/Hi_MO_6_Explorer_LR_5_54_HTH_415_430_M_V03_DG_cd1618eade.pdf" },
+    "model": { "value": "LR5-54HTH-420M", "source": "https://static.longi.com/Hi_MO_6_Explorer_LR_5_54_HTH_415_430_M_V03_DG_cd1618eade.pdf" },
+    "pStcW": { "value": 420, "source": "https://static.longi.com/Hi_MO_6_Explorer_LR_5_54_HTH_415_430_M_V03_DG_cd1618eade.pdf" },
+    "gammaPerK": { "value": -0.0029, "source": "https://static.longi.com/Hi_MO_6_Explorer_LR_5_54_HTH_415_430_M_V03_DG_cd1618eade.pdf" },
+    "noctC": { "value": 45, "source": "https://static.longi.com/Hi_MO_6_Explorer_LR_5_54_HTH_415_430_M_V03_DG_cd1618eade.pdf" },
+    "widthMm": { "value": 1134, "source": "https://static.longi.com/Hi_MO_6_Explorer_LR_5_54_HTH_415_430_M_V03_DG_cd1618eade.pdf" },
+    "heightMm": { "value": 1722, "source": "https://static.longi.com/Hi_MO_6_Explorer_LR_5_54_HTH_415_430_M_V03_DG_cd1618eade.pdf" },
+    "depthMm": { "value": 30, "source": "https://static.longi.com/Hi_MO_6_Explorer_LR_5_54_HTH_415_430_M_V03_DG_cd1618eade.pdf" }
+  },
+  {
+    "id": "longi-lr5-54hth-425m",
+    "manufacturer": { "value": "LONGi", "source": "https://static.longi.com/Hi_MO_6_Explorer_LR_5_54_HTH_415_430_M_V03_DG_cd1618eade.pdf" },
+    "model": { "value": "LR5-54HTH-425M", "source": "https://static.longi.com/Hi_MO_6_Explorer_LR_5_54_HTH_415_430_M_V03_DG_cd1618eade.pdf" },
+    "pStcW": { "value": 425, "source": "https://static.longi.com/Hi_MO_6_Explorer_LR_5_54_HTH_415_430_M_V03_DG_cd1618eade.pdf" },
+    "gammaPerK": { "value": -0.0029, "source": "https://static.longi.com/Hi_MO_6_Explorer_LR_5_54_HTH_415_430_M_V03_DG_cd1618eade.pdf" },
+    "noctC": { "value": 45, "source": "https://static.longi.com/Hi_MO_6_Explorer_LR_5_54_HTH_415_430_M_V03_DG_cd1618eade.pdf" },
+    "widthMm": { "value": 1134, "source": "https://static.longi.com/Hi_MO_6_Explorer_LR_5_54_HTH_415_430_M_V03_DG_cd1618eade.pdf" },
+    "heightMm": { "value": 1722, "source": "https://static.longi.com/Hi_MO_6_Explorer_LR_5_54_HTH_415_430_M_V03_DG_cd1618eade.pdf" },
+    "depthMm": { "value": 30, "source": "https://static.longi.com/Hi_MO_6_Explorer_LR_5_54_HTH_415_430_M_V03_DG_cd1618eade.pdf" }
+  },
+  {
+    "id": "longi-lr5-54hth-430m",
+    "manufacturer": { "value": "LONGi", "source": "https://static.longi.com/Hi_MO_6_Explorer_LR_5_54_HTH_415_430_M_V03_DG_cd1618eade.pdf" },
+    "model": { "value": "LR5-54HTH-430M", "source": "https://static.longi.com/Hi_MO_6_Explorer_LR_5_54_HTH_415_430_M_V03_DG_cd1618eade.pdf" },
+    "pStcW": { "value": 430, "source": "https://static.longi.com/Hi_MO_6_Explorer_LR_5_54_HTH_415_430_M_V03_DG_cd1618eade.pdf" },
+    "gammaPerK": { "value": -0.0029, "source": "https://static.longi.com/Hi_MO_6_Explorer_LR_5_54_HTH_415_430_M_V03_DG_cd1618eade.pdf" },
+    "noctC": { "value": 45, "source": "https://static.longi.com/Hi_MO_6_Explorer_LR_5_54_HTH_415_430_M_V03_DG_cd1618eade.pdf" },
+    "widthMm": { "value": 1134, "source": "https://static.longi.com/Hi_MO_6_Explorer_LR_5_54_HTH_415_430_M_V03_DG_cd1618eade.pdf" },
+    "heightMm": { "value": 1722, "source": "https://static.longi.com/Hi_MO_6_Explorer_LR_5_54_HTH_415_430_M_V03_DG_cd1618eade.pdf" },
+    "depthMm": { "value": 30, "source": "https://static.longi.com/Hi_MO_6_Explorer_LR_5_54_HTH_415_430_M_V03_DG_cd1618eade.pdf" }
+  }
+]

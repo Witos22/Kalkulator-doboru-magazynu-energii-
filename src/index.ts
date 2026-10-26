@@ -1,24 +1,24 @@
 import * as path from "node:path";
 import * as fs from "node:fs";
 
-import { TauronAdapter } from "./adapters/tauron-adapter.js";
-import { SemsAdapter } from "./adapters/sems-adapter.js";
-import { PvgisClient } from "./pvgis/pvgis-client.js";
-import { getAllProducts } from "./catalog/product-catalog.js";
-import { SelfConsumptionStrategy } from "./strategies/self-consumption.js";
-import { ScenarioScanner } from "./engine/scenario-scanner.js";
-import { createTariffSchedule } from "./types/tariff.js";
-import type { TariffType } from "./types/tariff.js";
-import type { InputSummary, FinancialAnalysisConfig } from "./types/financial.js";
-import type { TimeSeriesRecord } from "./types/timeseries.js";
-import type { PvProfileRecord } from "./types/pvgis.js";
+import { runAnalysis, AnalysisError } from "./analysis-runner.js";
+import { loadDeviceDatabase } from "./catalog/device-database.js";
+import type { AdapterType, PvInstallation } from "./analysis-runner.js";
+import { APPLIANCES } from "./adapters/declared-consumption-adapter.js";
+import type { Appliance } from "./adapters/declared-consumption-adapter.js";
+import type { TariffType, TariffPrices } from "./types/tariff.js";
+import type { ClientSegment, BuildingType } from "./types/financial.js";
 
 // ─── CLI Argument Parsing ────────────────────────────────────
 
 interface CliArgs {
-  csvPath: string;
-  adapter: "tauron" | "sems";
+  annualConsumptionKwh: number | null;
+  appliances: Appliance[];
+  csvPath: string | null;
+  adapter: AdapterType;
   tariff: TariffType;
+  targetTariff: TariffType | null;
+  targetTariffPrices: TariffPrices | null;
   lat: number;
   lon: number;
   contractedPowerKw: number;
@@ -26,6 +26,27 @@ interface CliArgs {
   outputPath: string | null;
   tilt: number | null;
   azimuth: number | null;
+  // Tylko dla --adapter moj-licznik-daily:
+  csvAPlusPaths: string[] | null;
+  csvAMinusPaths: string[] | null;
+  /** Wiele instalacji PV o różnych azymutach/kątach (tylko moj-licznik-daily); nadpisuje existing-pv/tilt/azimuth */
+  installations: PvInstallation[] | null;
+  /** Korekta cen taryfy (energia/dystrybucja per strefa) */
+  tariffPrices: TariffPrices | null;
+  /** Segment klienta (VAT: netto dla firm, brutto dla prosumentów/B2C). Domyślnie wg adaptera. */
+  clientSegment: ClientSegment | null;
+  /** Wartość eksportu [PLN/kWh] — korekta domyślnej wartości orientacyjnej (0,30 zł) */
+  exportPricePerKwh: number | null;
+  gridConnectionPowerKw: number | null;
+  exportLimitKw: number | null;
+  /** System rozliczeń prosumenta: net-billing (domyślnie) albo opusty (nieobsługiwane, blokuje analizę) */
+  settlementSystem: "net-billing" | "opusty" | null;
+  /** Typ budynku — sugeruje stawkę VAT (mieszkalny ≤300m² → 8%, inne → 23%) */
+  buildingType: BuildingType | null;
+  /** Jawna korekta stawki VAT [ułamek] — nadpisuje sugestię z buildingType */
+  vatRatePercent: number | null;
+  /** Marka istniejącego falownika klienta (np. "Huawei", "Sigenergy") */
+  existingInverterBrand: string | null;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -40,8 +61,52 @@ function parseArgs(argv: string[]): CliArgs {
     }
   }
 
-  const csvPath = parsed["csv"];
-  if (!csvPath) {
+  const adapter = (parsed["adapter"] as AdapterType) ?? "tauron";
+
+  const csvPath = parsed["csv"] ?? null;
+
+  const readXlsDir = (dirFlag: string): string[] | null => {
+    const dir = parsed[dirFlag];
+    if (dir === undefined) return null;
+    if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) {
+      console.error(`❌ --${dirFlag} nie jest istniejącym katalogiem: ${dir}`);
+      printUsage();
+      process.exit(1);
+    }
+    return fs.readdirSync(dir)
+      .filter((f) => /\.xlsx?$/i.test(f))
+      .map((f) => path.join(dir, f));
+  };
+  const csvAPlusPaths = readXlsDir("a-plus-dir");
+  const csvAMinusPaths = readXlsDir("a-minus-dir");
+
+  if (adapter === "moj-licznik-daily") {
+    if (!csvAPlusPaths?.length || !csvAMinusPaths?.length) {
+      console.error("❌ Adapter moj-licznik-daily wymaga --a-plus-dir i --a-minus-dir (katalogi z 12 plikami .xls każdy).");
+      printUsage();
+      process.exit(1);
+    }
+    if (parsed["existing-pv"] === undefined && parsed["installations"] === undefined) {
+      console.error("❌ Adapter moj-licznik-daily wymaga --existing-pv (moc instalacji PV [kWp]) albo --installations.");
+      printUsage();
+      process.exit(1);
+    }
+  } else if (adapter === "declared") {
+    if (parsed["annual-consumption"] === undefined) {
+      console.error("❌ Adapter declared wymaga --annual-consumption (roczne zużycie z sieci [kWh], z faktur).");
+      printUsage();
+      process.exit(1);
+    }
+  } else if (!csvPath) {
+    printUsage();
+    process.exit(1);
+  }
+
+  const annualConsumptionKwh = parsed["annual-consumption"] !== undefined ? parseFloat(parsed["annual-consumption"]) : null;
+  const appliances = (parsed["appliances"] ?? "").split(",").map((x) => x.trim()).filter((x) => x !== "") as Appliance[];
+  const unknownAppliance = appliances.find((a) => !APPLIANCES.includes(a));
+  if (unknownAppliance !== undefined) {
+    console.error(`❌ Nieznany odbiornik w --appliances: ${unknownAppliance} (dozwolone: ${APPLIANCES.join(", ")})`);
     printUsage();
     process.exit(1);
   }
@@ -54,14 +119,41 @@ function parseArgs(argv: string[]): CliArgs {
     : null;
   const tilt = parsed["tilt"] !== undefined ? parseFloat(parsed["tilt"]) : null;
   const azimuth = parsed["azimuth"] !== undefined ? parseFloat(parsed["azimuth"]) : null;
+  const exportPricePerKwh = parsed["export-price"] !== undefined ? parseFloat(parsed["export-price"]) : null;
+  const gridConnectionPowerKw = parsed["grid-connection-kw"] !== undefined ? parseFloat(parsed["grid-connection-kw"]) : null;
+  const exportLimitKw = parsed["export-limit-kw"] !== undefined ? parseFloat(parsed["export-limit-kw"]) : null;
+
+  let installations: PvInstallation[] | null = null;
+  if (parsed["installations"] !== undefined) {
+    try {
+      const raw = JSON.parse(parsed["installations"]) as Array<{ kwp: number; tilt?: number; azimuth?: number; inverter?: string; inverterAcKw?: number; planned?: boolean }>;
+      if (!Array.isArray(raw) || raw.length === 0) throw new Error("pusta lista");
+      installations = raw.map((r) => ({
+        kwp: r.kwp,
+        tilt: r.tilt ?? null,
+        azimuth: r.azimuth ?? null,
+        inverterBrand: r.inverter ?? "",
+        inverterAcKw: r.inverterAcKw ?? NaN,
+        planned: r.planned === true,
+      }));
+    } catch (error) {
+      console.error(`❌ Nieprawidłowy format --installations (oczekiwano JSON, np. '[{"kwp":6,"tilt":35,"azimuth":180,"inverter":"Huawei","inverterAcKw":5}]'): ${error instanceof Error ? error.message : error}`);
+      printUsage();
+      process.exit(1);
+    }
+  }
 
   const numericChecks: Array<[string, number | null]> = [
+    ["--annual-consumption", annualConsumptionKwh],
     ["--lat", lat],
     ["--lon", lon],
     ["--contracted-power", contractedPowerKw],
     ["--existing-pv", existingPvKwp],
     ["--tilt", tilt],
     ["--azimuth", azimuth],
+    ["--export-price", exportPricePerKwh],
+    ["--grid-connection-kw", gridConnectionPowerKw],
+    ["--export-limit-kw", exportLimitKw],
   ];
   for (const [flag, value] of numericChecks) {
     if (value !== null && Number.isNaN(value)) {
@@ -71,10 +163,36 @@ function parseArgs(argv: string[]): CliArgs {
     }
   }
 
+  let tariffPrices: TariffPrices | null = null;
+  if (parsed["tariff-prices"] !== undefined) {
+    try {
+      tariffPrices = JSON.parse(parsed["tariff-prices"]) as TariffPrices;
+    } catch (error) {
+      console.error(`❌ Nieprawidłowy format --tariff-prices (oczekiwano JSON): ${error instanceof Error ? error.message : error}`);
+      printUsage();
+      process.exit(1);
+    }
+  }
+
+  let targetTariffPrices: TariffPrices | null = null;
+  if (parsed["target-tariff-prices"] !== undefined) {
+    try {
+      targetTariffPrices = JSON.parse(parsed["target-tariff-prices"]) as TariffPrices;
+    } catch (error) {
+      console.error(`❌ Nieprawidłowy format --target-tariff-prices (oczekiwano JSON): ${error instanceof Error ? error.message : error}`);
+      printUsage();
+      process.exit(1);
+    }
+  }
+
   return {
+    annualConsumptionKwh,
+    appliances,
     csvPath,
-    adapter: (parsed["adapter"] as "tauron" | "sems") ?? "tauron",
+    adapter,
     tariff: (parsed["tariff"] as TariffType) ?? "G11",
+    targetTariff: (parsed["target-tariff"] as TariffType | undefined) ?? null,
+    targetTariffPrices,
     lat,
     lon,
     contractedPowerKw,
@@ -82,6 +200,18 @@ function parseArgs(argv: string[]): CliArgs {
     outputPath: parsed["output"] ?? null,
     tilt,
     azimuth,
+    csvAPlusPaths,
+    csvAMinusPaths,
+    installations,
+    tariffPrices,
+    clientSegment: (parsed["client-segment"] as ClientSegment) ?? null,
+    exportPricePerKwh,
+    gridConnectionPowerKw,
+    exportLimitKw,
+    settlementSystem: (parsed["settlement-system"] as "net-billing" | "opusty") ?? null,
+    buildingType: (parsed["building-type"] as BuildingType) ?? null,
+    vatRatePercent: parsed["vat-rate"] !== undefined ? parseFloat(parsed["vat-rate"]) : null,
+    existingInverterBrand: parsed["existing-inverter"] ?? null,
   };
 }
 
@@ -91,10 +221,10 @@ function printUsage(): void {
 ║       Kalkulator Magazynu Energii — Silnik Rekomendacyjny   ║
 ╚══════════════════════════════════════════════════════════════╝
 
-USAGE:
+USAGE (OSD/SEMS/firma):
   tsx src/index.ts \\
     --csv ./dane/tauron_2024.csv \\
-    --adapter tauron|sems \\
+    --adapter tauron|sems|firma-15min \\
     --tariff G11|G12|G12w|G13 \\
     --lat 52.23 --lon 21.01 \\
     --contracted-power 10 \\
@@ -102,43 +232,81 @@ USAGE:
     [--tilt 35 --azimuth 180] \\
     [--output ./raport.json]
 
+USAGE (prosument, "Mój Licznik", dane dobowe):
+  tsx src/index.ts \\
+    --adapter moj-licznik-daily \\
+    --a-plus-dir ./pobor_A+ --a-minus-dir ./pobor_A- \\
+    --existing-pv 10.8 [--tilt 35 --azimuth 180] \\
+    --tariff G12 --lat 52.23 --lon 21.01 --contracted-power 10
+
 OPTIONS:
-  --csv               Ścieżka do pliku CSV z danymi energetycznymi (wymagane)
-  --adapter           Typ adaptera CSV: tauron, sems (domyślnie: tauron)
-  --tariff            Typ taryfy: G11, G12, G12w, G13 (domyślnie: G11)
+  --csv               Ścieżka do pliku z danymi energetycznymi (wymagane dla tauron/sems/firma-15min)
+  --adapter           Typ adaptera: tauron, sems, firma-15min, moj-licznik-daily, declared (domyślnie: tauron)
+  --tariff            Typ taryfy: G11, G12, G12w, G13 (domyślnie: G11). Dla taryf
+                      wielostrefowych magazyn dodatkowo dogrywa się z sieci w
+                      najtańszej strefie, jeśli to się opłaca (arbitraż taryfowy).
+  --annual-consumption  Roczne zużycie z sieci [kWh] z faktur — dla --adapter declared (bez plików pomiarowych, tylko obiekt bez PV)
+  --appliances        Odbiorniki kształtujące profil (dla declared), po przecinku: heat-pump, ev, ac, boiler, remote-work
   --lat               Szerokość geograficzna (domyślnie: 52.23 = Warszawa)
   --lon               Długość geograficzna (domyślnie: 21.01)
   --contracted-power  Moc umowna [kW] (domyślnie: 10)
-  --existing-pv       Istniejąca moc PV [kWp] — pomiń jeśli brak PV (wymaga --adapter sems)
+  --existing-pv       Istniejąca moc PV [kWp] — pomiń jeśli brak PV (wymagane dla moj-licznik-daily/sems)
   --tilt              Kąt nachylenia paneli PV [°] — wymaga podania razem z --azimuth
-                      (domyślnie: PVGIS dobiera kąt optymalny)
+                      (domyślnie: 35° na południe)
   --azimuth           Azymut/orientacja paneli PV [°, 180 = południe] — wymaga --tilt
+  --installations     Wiele instalacji PV o różnych azymutach/kątach (tylko moj-licznik-daily), JSON, np.:
+                      '[{"kwp":6,"tilt":35,"azimuth":180,"inverter":"Huawei","inverterAcKw":5},{"kwp":3,"tilt":35,"azimuth":90,"inverter":"Huawei","inverterAcKw":3}]'
+                      Pola "inverter" (marka falownika) i "inverterAcKw" (moc AC [kW]) są wymagane przy każdej instalacji.
+                      Opcjonalne "planned":true oznacza instalację jeszcze niezrealizowaną (liczona jak istniejąca,
+                      ale pominięta przy odtwarzaniu zużycia).
+                      Nadpisuje --existing-pv/--tilt/--azimuth (suma kwp = łączna moc PV).
+  --client-segment    Segment klienta: prosument, firma, b2c — decyduje, czy ceny magazynu/PV
+                      są netto (firma) czy brutto z 23% VAT (prosument/b2c). Domyślnie:
+                      firma dla --adapter firma-15min, prosument dla pozostałych.
+  --grid-connection-kw  Moc przyłączeniowa / zabezpieczenie przedlicznikowe [kW] — limit poboru z sieci (np. ładowania nocnego)
+  --export-limit-kw   Limit oddawania do sieci [kW]; 0 = zero export (nadwyżka ucinana)
+  --target-tariff     Taryfa docelowa po inwestycji (domyślnie = --tariff); raport pokazuje osobno efekt zmiany taryfy
+  --target-tariff-prices  Korekta cen taryfy docelowej (JSON, jak --tariff-prices)
+  --tariff-prices     Korekta cen taryfy (domyślne są orientacyjne), JSON, np. dla G12:
+                      '{"type":"G12","zones":{"dzien":{"energyPricePerKwh":0.62,"distributionPricePerKwh":0.42},"noc":{"energyPricePerKwh":0.38,"distributionPricePerKwh":0.09}}}'
+  --export-price      Wartość 1 kWh oddanej do sieci [PLN/kWh] — domyślnie 0,30 (orientacyjnie,
+                      NIE realna stawka RCEm — realny mechanizm depozytu jest bardziej złożony)
+  --settlement-system net-billing (domyślnie) albo opusty (net-metering sprzed 04.2022:
+                      kredyt 0,8/0,7 w kWh zamiast wyceny pieniężnej; bez arbitrażu z sieci;
+                      bilans roczny per strefa — uproszczenie, [DO WERYFIKACJI])
+  --building-type     mieszkalny_do_300m2 | mieszkalny_powyzej_300m2 | niemieszkalny —
+                      sugeruje stawkę VAT dla prosumenta/b2c (8% dla ≤300m², inaczej 23%,
+                      [DO WERYFIKACJI] per przypadek). Nie dotyczy segmentu firma.
+  --vat-rate          Jawna korekta stawki VAT [ułamek, np. 0.08], nadpisuje --building-type
+  --existing-inverter Marka istniejącego falownika (np. Huawei, Sigenergy, Fronius, "nie wiem").
+                      Zgodna hybryda: sprzężenie DC i 0 zł. On-grid albo „nie wiem”:
+                      porównanie AC (zostaje stary falownik, sprawność × 0,95) z wymianą na hybrydę.
   --output            Ścieżka do pliku wyjściowego JSON (opcjonalnie)
+
+OPCJE TYLKO DLA --adapter moj-licznik-daily:
+  --a-plus-dir        Katalog z 12 plikami "Pobór A+" (raport dobowy, jeden na miesiąc, .xls)
+  --a-minus-dir       Katalog z 12 plikami "Energia oddana A-" (raport dobowy, jeden na miesiąc, .xls)
+                      Wymagane też: --existing-pv albo --installations. Zużycie liczone osobno
+                      dla każdego dnia i każdej strefy (dzień/noc), nie z jednej liczby netto
+                      na miesiąc — patrz src/adapters/moj-licznik-daily-adapter.ts.
 `);
 }
 
 // ─── Main ────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
+  loadDeviceDatabase();
   const args = parseArgs(process.argv);
-
-  if (args.adapter === "tauron" && args.existingPvKwp !== null) {
-    console.error(
-      "❌ Nieprawidłowa kombinacja: --adapter tauron razem z --existing-pv.\n" +
-      "   Dane z licznika OSD (Tauron) dla obiektu z już istniejącym PV są\n" +
-      "   rozliczane netto (po autokonsumpcji), więc nie da się ich poprawnie\n" +
-      "   połączyć z osobno symulowaną produkcją PV z PVGIS — wynik byłby błędny\n" +
-      "   (podwójne uwzględnienie efektu istniejącej instalacji).\n" +
-      "   Dla obiektu z PV użyj: --adapter sems z danymi z monitoringu falownika."
-    );
-    process.exit(1);
-  }
 
   console.log("🔌 Kalkulator Magazynu Energii");
   console.log("─".repeat(50));
-  console.log(`📂 CSV: ${args.csvPath}`);
+  if (args.adapter === "moj-licznik-daily") {
+    console.log(`📂 Raporty dobowe A+: ${args.csvAPlusPaths?.length ?? 0} plików, A-: ${args.csvAMinusPaths?.length ?? 0} plików`);
+  } else {
+    console.log(`📂 CSV: ${args.csvPath}`);
+  }
   console.log(`🔧 Adapter: ${args.adapter}`);
-  console.log(`💰 Taryfa: ${args.tariff}`);
+  console.log(`💰 Taryfa obecna: ${args.tariff}${args.targetTariff !== null && args.targetTariff !== args.tariff ? ` → docelowa: ${args.targetTariff}` : ""}`);
   console.log(`📍 Lokalizacja: ${args.lat}, ${args.lon}`);
   console.log(`⚡ Moc umowna: ${args.contractedPowerKw} kW`);
   if (args.existingPvKwp !== null) {
@@ -147,117 +315,64 @@ async function main(): Promise<void> {
     console.log(`☀️  Istniejące PV: brak — program dobierze optymalny rozmiar instalacji PV (skan 3–15 kWp)`);
   }
   console.log("─".repeat(50));
+  console.log();
 
-  // --- 1. Parsowanie CSV ---
-  console.log("\n📊 Parsowanie pliku CSV...");
-  let loadProfile: TimeSeriesRecord[];
-
-  if (args.adapter === "sems") {
-    const adapter = new SemsAdapter();
-    loadProfile = await adapter.parse(args.csvPath);
-  } else {
-    const adapter = new TauronAdapter();
-    loadProfile = await adapter.parse(args.csvPath);
-  }
-
-  console.log(`   ✅ Wczytano ${loadProfile.length} rekordów`);
-
-  if (loadProfile.length === 0) {
-    console.error("❌ Brak danych w pliku CSV. Sprawdź format i nazwy kolumn.");
-    process.exit(1);
-  }
-
-  // --- Podsumowanie zużycia ---
-  let totalConsumption = 0;
-  for (const record of loadProfile) {
-    totalConsumption += record.loadKw * 0.25;
-  }
-  console.log(`   📈 Roczne zużycie: ${totalConsumption.toFixed(0)} kWh`);
-
-  // --- 2. Pobieranie profilu PV z PVGIS (jeśli brak istniejącego PV) ---
-  let pvBaseProfile: PvProfileRecord[] | null = null;
-
-  if (args.adapter === "sems" && args.existingPvKwp !== null) {
-    // Dane SEMS zawierają produkcję PV — nie potrzebujemy PVGIS
-    console.log("\n☀️  Profil PV: z danych SEMS (realna produkcja)");
-    pvBaseProfile = null;
-  } else {
-    // Pobieramy profil PV z PVGIS dla 1 kWp (potem skalujemy)
-    console.log("\n☀️  Pobieranie profilu PV z PVGIS API (1 kWp)...");
-    const pvgis = new PvgisClient();
-    const pvgisOptions = args.tilt !== null && args.azimuth !== null
-      ? { tilt: args.tilt, azimuth: args.azimuth }
-      : undefined;
-    try {
-      pvBaseProfile = await pvgis.fetchPvProfile(args.lat, args.lon, 1, pvgisOptions);
-      console.log(`   ✅ Pobrano ${pvBaseProfile.length} rekordów PV (15-min)`);
-    } catch (error) {
-      console.error(`❌ Błąd pobierania danych PV z PVGIS: ${error instanceof Error ? error.message : String(error)}`);
-      console.error("   Bez profilu produkcji PV analiza PV+magazynu byłaby błędna (zerowa produkcja PV).");
-      console.error("   Sprawdź współrzędne (--lat/--lon) i połączenie z internetem, po czym spróbuj ponownie.");
-      process.exit(1);
-    }
-  }
-
-  // --- 3. Konfiguracja skanera ---
-  const tariff = createTariffSchedule(args.tariff);
-  const products = getAllProducts();
-  const strategy = new SelfConsumptionStrategy();
-
-  // Moce PV do przetestowania
-  const pvSizesToTest: number[] = args.existingPvKwp !== null
-    ? [args.existingPvKwp] // Użytkownik ma PV — testujemy tylko tę moc
-    : [3, 4, 5, 6, 7, 8, 9, 10, 12, 15]; // Skanujemy różne moce
-
-  const financialConfig: FinancialAnalysisConfig = {
-    horizonYears: 15,
-    discountRate: 0.05,
-    energyPriceInflation: 0.03,
-  };
-
-  const inputSummary: InputSummary = {
-    tariffType: args.tariff,
-    annualConsumptionKwh: totalConsumption,
-    existingPvKwp: args.existingPvKwp,
-    location: { lat: args.lat, lon: args.lon },
+  const report = await runAnalysis({
+    adapter: args.adapter,
+    tariff: args.tariff,
+    targetTariff: args.targetTariff ?? undefined,
+    targetTariffPrices: args.targetTariffPrices ?? undefined,
+    lat: args.lat,
+    lon: args.lon,
     contractedPowerKw: args.contractedPowerKw,
-  };
+    annualConsumptionKwh: args.annualConsumptionKwh ?? undefined,
+    appliances: args.appliances,
+    existingPvKwp: args.existingPvKwp,
+    tilt: args.tilt,
+    azimuth: args.azimuth,
+    csvPath: args.csvPath ?? undefined,
+    csvAPlusPaths: args.csvAPlusPaths ?? undefined,
+    csvAMinusPaths: args.csvAMinusPaths ?? undefined,
+    installations: args.installations ?? undefined,
+    customTariffPrices: args.tariffPrices ?? undefined,
+    clientSegment: args.clientSegment ?? undefined,
+    exportPricePerKwh: args.exportPricePerKwh ?? undefined,
+    gridConnectionPowerKw: args.gridConnectionPowerKw ?? undefined,
+    exportLimitKw: args.exportLimitKw ?? undefined,
+    settlementSystem: args.settlementSystem ?? undefined,
+    buildingType: args.buildingType ?? undefined,
+    vatRatePercent: args.vatRatePercent ?? undefined,
+    existingInverterBrand: args.existingInverterBrand ?? undefined,
+    onProgress: (message) => console.log(`   ${message}`),
+  });
 
-  // --- 4. Skanowanie scenariuszy ---
-  const totalBessConfigs = products.reduce((sum, p) => sum + p.maxModules, 0);
-  const totalScenarios = pvSizesToTest.length * totalBessConfigs;
-  console.log(
-    `\n🔍 Skanowanie ${totalScenarios} scenariuszy ` +
-    `(${pvSizesToTest.length} PV × ${totalBessConfigs} konfiguracji magazynu z ${products.length} produktów)...`
-  );
+  // --- Wyświetlenie wyników ---
+  if (report.assumptions !== undefined && report.assumptions.length > 0) {
+    console.log("\nZałożenia:");
+    for (const line of report.assumptions) console.log(`  • ${line}`);
+  }
 
-  const scanner = new ScenarioScanner(strategy, financialConfig);
-  const report = scanner.scan(loadProfile, pvBaseProfile, {
-    pvSizesToTest,
-    products: [...products],
-    tariff,
-    financialConfig,
-    topN: 3,
-  }, inputSummary);
-
-  // --- 5. Wyświetlenie wyników ---
   console.log("\n" + "═".repeat(76));
   console.log("  WYNIKI ANALIZY — TOP 3 KONFIGURACJE");
   console.log("═".repeat(76));
 
-  // Tabela porównawcza
   console.log("\n┌─────────────────────────────────┬───────┬──────────┬───────────┬──────────┬──────────┬──────────┐");
   console.log("│ Konfiguracja                    │ PV    │ Autokon. │ Pobór     │ Cykli/r  │ Koszt    │ Payback  │");
   console.log("│                                 │ [kWp] │ [%]      │ sieć[kWh] │          │ [PLN]    │ [lata]   │");
   console.log("├─────────────────────────────────┼───────┼──────────┼───────────┼──────────┼──────────┼──────────┤");
 
-  // Baseline
   const bl = report.baseline;
   console.log(
     `│ ${"Baseline (bez PV/BESS)".padEnd(31)} │ ${"-".padStart(5)} │ ${"-".padStart(6)}%  │ ${bl.totalGridImportKwh.toFixed(0).padStart(9)} │ ${"-".padStart(8)} │ ${"-".padStart(8)} │ ${"-".padStart(8)} │`
   );
 
-  // Top 3
+  const top = report.top3[0];
+  if (top !== undefined) {
+    console.log(
+      `│ ${"Samo PV (bez magazynu)".padEnd(31)} │ ${top.simulationResult.pvSizeKwp.toString().padStart(5)} │ ${top.referenceSelfConsumptionRate.toFixed(0).padStart(6)}%  │ ${top.referenceGridImportKwh.toFixed(0).padStart(9)} │ ${"-".padStart(8)} │ ${"-".padStart(8)} │ ${"-".padStart(8)} │`
+    );
+  }
+
   for (let i = 0; i < report.top3.length; i++) {
     const fr = report.top3[i]!;
     const sim = fr.simulationResult;
@@ -274,28 +389,121 @@ async function main(): Promise<void> {
   }
 
   console.log("└─────────────────────────────────┴───────┴──────────┴───────────┴──────────┴──────────┴──────────┘");
+  if (report.top3[0] !== undefined) {
+    console.log(`   (ceny magazynu/PV: ${report.top3[0].priceBasis}, segment: ${report.inputSummary.clientSegment}, system rozliczeń: ${report.inputSummary.settlementSystem}, stawki taryfy: ${report.inputSummary.tariffPricesBasis})`);
+  }
 
-  // Rekomendacja
   console.log("\n" + report.recommendation);
 
-  // --- 6. Zapis raportu JSON ---
-  if (args.outputPath !== null) {
-    // Usuwamy steps z raportu JSON (za duży) — zostawiamy tylko KPI
-    const compactReport = {
-      ...report,
-      baseline: { ...report.baseline, steps: `[${report.baseline.steps.length} records — omitted for compactness]` },
-      allScenarios: report.allScenarios.map((fr) => ({
-        ...fr,
-        simulationResult: { ...fr.simulationResult, steps: `[${fr.simulationResult.steps.length} records]` },
-      })),
-      top3: report.top3.map((fr) => ({
-        ...fr,
-        simulationResult: { ...fr.simulationResult, steps: `[${fr.simulationResult.steps.length} records]` },
-      })),
-    };
+  if (report.tariffChange !== undefined) {
+    const tc = report.tariffChange;
+    console.log(
+      `
+🔄 Sama zmiana taryfy ${tc.currentTariff} → ${tc.targetTariff} (bez inwestycji): koszt energii ` +
+      `${tc.annualCostCurrentPln.toFixed(0)} → ${tc.annualCostTargetPln.toFixed(0)} PLN/rok, ` +
+      `efekt ${tc.annualEffectPln >= 0 ? "+" : ""}${tc.annualEffectPln.toFixed(0)} PLN/rok. ` +
+      `Wyniki magazynu poniżej liczone w taryfie docelowej i NIE zawierają tego efektu.`
+    );
+  }
 
+  if (report.pvOnly !== undefined) {
+    const po = report.pvOnly;
+    console.log(
+      `\n☀️  Dla porównania — samo PV ${po.pvSizeKwp} kWp bez magazynu: koszt ${po.investmentCostPln.toFixed(0)} PLN, ` +
+      `oszczędności ${po.annualSavingsYear1Pln.toFixed(0)} PLN/rok, ` +
+      `payback ${po.paybackYears === Infinity ? "nie zwraca się" : po.paybackYears.toFixed(1) + " lat"}, NPV ${po.npvPln.toFixed(0)} PLN`
+    );
+  }
+
+  // Drugi ranking — po NPV (I8 audytu): ranking po payback faworyzuje najmniejszy magazyn.
+  console.log("\n💎 Ranking wg NPV (największa wartość netto w horyzoncie; tylko warianty zwracające się w horyzoncie):");
+  if (report.top3ByNpv.length === 0) {
+    console.log("   brak wariantów, które się zwracają w horyzoncie analizy");
+  } else if (report.top3ByNpv[0]!.npvPln <= 0) {
+    console.log("   ⚠️  Nawet najlepszy wariant ma NPV ≤ 0 — przy tych założeniach (wymiana po gwarancji, VAT, wartość eksportu)");
+    console.log("      magazyn zwraca się nominalnie, ale nie tworzy wartości netto w horyzoncie analizy.");
+  }
+  for (let i = 0; i < report.top3ByNpv.length; i++) {
+    const fr = report.top3ByNpv[i]!;
+    const bc = fr.simulationResult.bessConfig;
+    if (bc === null) continue;
+    const cap = (bc.product.usableCapacityKwh * bc.moduleCount).toFixed(1);
+    console.log(
+      `   #${i + 1} ${bc.product.manufacturer} ${bc.product.model} ${cap}kWh — NPV ${fr.npvPln.toFixed(0)} PLN, ` +
+      `koszt ${fr.investmentCostPln.toFixed(0)} PLN, payback ${fr.paybackYears.toFixed(1)} lat`
+    );
+  }
+
+  const printBestPerManufacturer = (results: typeof report.bestPerManufacturer): void => {
+    for (const fr of results) {
+      const bc = fr.simulationResult.bessConfig;
+      if (bc === null) continue;
+      const cap = (bc.product.usableCapacityKwh * bc.moduleCount).toFixed(1);
+      const pb = fr.paybackYears === Infinity ? "∞" : `${fr.paybackYears.toFixed(1)} lat`;
+      console.log(
+        `   ${bc.product.manufacturer.padEnd(10)} ${bc.product.model} ${cap}kWh — PV ${fr.simulationResult.pvSizeKwp} kWp, ` +
+        `koszt ${fr.investmentCostPln.toFixed(0)} PLN, oszczędności ${fr.annualSavingsYear1Pln.toFixed(0)} PLN/rok, payback ${pb}`
+      );
+    }
+  };
+
+  console.log("\n🏭 Najlepszy magazyn każdego producenta:");
+  printBestPerManufacturer(report.bestPerManufacturer);
+
+  if (report.dataSource !== undefined) {
+    console.log(`\n📚 Źródło danych: poziom ${report.dataSource.level} — ${report.dataSource.label}\n   Niepewność: ${report.dataSource.uncertainty}`);
+  }
+
+  if (report.inputSummary.plannedPvKwp > 0) {
+    console.log(`
+🔧 Instalacje do realizacji: ${report.inputSummary.plannedPvKwp} kWp — wliczone w wynik jak istniejące (koszt PV pominięty), pominięte przy odtwarzaniu zużycia.`);
+  }
+
+  if (report.sensitivity !== undefined) {
+    console.log(`\n📉 Wrażliwość NPV rekomendowanego wariantu (bazowo ${report.sensitivity.baseNpvPln.toFixed(0)} PLN):`);
+    for (const r of report.sensitivity.rows) {
+      console.log(
+        `   ${r.parameter.padEnd(34)} ${r.lowLabel.padStart(10)}: ${r.npvLowPln.toFixed(0).padStart(8)} PLN   ` +
+        `${r.highLabel.padStart(10)}: ${r.npvHighPln.toFixed(0).padStart(8)} PLN`,
+      );
+    }
+  }
+
+  if (report.inverterClippingNote !== undefined) {
+    console.log(`\n🔌 ${report.inverterClippingNote}`);
+  }
+
+  for (const w of report.validationWarnings ?? []) {
+    console.log(`\n⚠️  Walidacja danych: ${w}`);
+  }
+
+  if (report.powerLimitNote !== undefined) {
+    console.log(`
+⚡ Limity mocy: ${report.powerLimitNote}`);
+  }
+
+  if (report.dataQualityWarning !== undefined) {
+    console.log(`\n⚠️  Jakość danych: ${report.dataQualityWarning}`);
+  }
+
+  if (report.pvExpansionSuggestion !== undefined) {
+    if (report.pvExpansionSuggestion === null) {
+      console.log(
+        "\n⚠️  Nawet zwiększenie instalacji PV (sprawdzono do 100 kWp) nie sprawia, że ten magazyn się zwraca.\n" +
+        "   Ograniczeniem jest pojemność/koszt samego magazynu, nie zbyt mała moc PV — rozważ mniejszy magazyn."
+      );
+    } else {
+      console.log(
+        `\n💡 Przy PV ≥ ${report.pvExpansionSuggestion.pvSizeKwp} kWp ten sam magazyn zwróciłby się w ${report.pvExpansionSuggestion.paybackYears.toFixed(1)} lat.`
+      );
+    }
+  }
+
+  if (args.outputPath !== null) {
+    // `steps` (kroki 15-min) są już puste u źródła (ScenarioScanner zwalnia
+    // je po policzeniu kosztów) — raport można zapisać bez dodatkowego trymowania.
     const outputPath = path.resolve(args.outputPath);
-    fs.writeFileSync(outputPath, JSON.stringify(compactReport, null, 2), "utf8");
+    fs.writeFileSync(outputPath, JSON.stringify(report, null, 2), "utf8");
     console.log(`\n💾 Raport zapisano do: ${outputPath}`);
   }
 
@@ -303,6 +511,10 @@ async function main(): Promise<void> {
 }
 
 main().catch((error) => {
-  console.error(`❌ Błąd krytyczny: ${error instanceof Error ? error.message : String(error)}`);
+  if (error instanceof AnalysisError) {
+    console.error(`❌ ${error.message}`);
+  } else {
+    console.error(`❌ Błąd krytyczny: ${error instanceof Error ? error.message : String(error)}`);
+  }
   process.exit(1);
 });

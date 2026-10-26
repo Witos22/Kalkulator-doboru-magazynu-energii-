@@ -25,10 +25,16 @@ export interface SimulationStepResult {
   readonly selfConsumedKwh: number;
   /** Energia pobrana z sieci [kWh] */
   readonly gridImportKwh: number;
+  /** Energia PV, której nie wolno było oddać (limit eksportu / zero export) i która została ucięta [kWh] */
+  readonly curtailedKwh?: number | undefined;
   /** Energia oddana do sieci [kWh] */
   readonly gridExportKwh: number;
-  /** Energia załadowana do baterii [kWh] */
+  /** Energia załadowana do baterii [kWh] (suma: z nadwyżki PV + z sieci w taniej strefie) */
   readonly bessChargedKwh: number;
+  /** Z czego: energia załadowana z nadwyżki produkcji PV [kWh] */
+  readonly bessChargedFromPvKwh: number;
+  /** Z czego: energia dograna z sieci w najtańszej strefie taryfy (arbitraż) [kWh] */
+  readonly bessChargedFromGridKwh: number;
   /** Energia rozładowana z baterii [kWh] */
   readonly bessDischargedKwh: number;
   /** Stan baterii po kroku */
@@ -50,6 +56,8 @@ export interface SimulationResult {
   readonly totalSelfConsumedKwh: number;
   readonly totalGridImportKwh: number;
   readonly totalGridExportKwh: number;
+  /** Energia PV ucięta przez limit eksportu [kWh] */
+  readonly totalCurtailedKwh: number;
   readonly totalBessChargedKwh: number;
   readonly totalBessDischargedKwh: number;
 

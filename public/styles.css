@@ -1,0 +1,595 @@
+/*
+ * Paleta i typografia przeniesione 1:1 z prawdziwych szablonów maili Nivato
+ * (nivato-app-auth-server-prod/src/main/resources/templates/mail/*.html) —
+ * to jest aktualny, produkcyjny design system marki, nie brand book z wcześniejszej
+ * wersji tego pliku. Kolory, stos fontów, promienie zaokrągleń i cień karty są
+ * stamtąd skopiowane bez zmian; system przezroczystości tekstu (białe z alpha)
+ * też jest stamtąd — zastępuje wcześniejsze płaskie odcienie zieleni.
+ */
+
+:root {
+  --brand-night: #00180d;      /* tło strony — identyczne jak tło maili */
+  --brand-surface: #0b1a10;    /* tło karty — identyczne jak email-container */
+  --brand-accent: #2dcd84;
+  --brand-accent-strong: #27b776;
+  --brand-danger: #e5484d;     /* czerwień z maila usunięcia konta */
+
+  --brand-ink: #ffffff;
+  --text-90: rgba(255, 255, 255, 0.9);
+  --text-75: rgba(255, 255, 255, 0.75);
+  --text-70: rgba(255, 255, 255, 0.7);
+  --text-60: rgba(255, 255, 255, 0.6);
+  --text-50: rgba(255, 255, 255, 0.5);
+  --text-40: rgba(255, 255, 255, 0.4);
+  --text-30: rgba(255, 255, 255, 0.3);
+
+  --border-subtle: rgba(255, 255, 255, 0.1);
+  --border-input: rgba(255, 255, 255, 0.14);
+  --border-accent-10: rgba(45, 205, 132, 0.1);
+  --border-accent-15: rgba(45, 205, 132, 0.15);
+
+  --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+
+  /* Bez tego Chrome renderuje natywne kontrolki (m.in. listę rozwijaną
+     <select>) w jasnym motywie systemowym, ignorując nasze kolory na <option>. */
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--brand-night);
+  color: var(--brand-ink);
+  font-family: var(--font-family);
+  line-height: 1.5;
+}
+
+.page {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px 16px 64px;
+}
+
+/* ─── Header ─────────────────────────────── */
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 0 32px;
+}
+
+.logo-mark {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
+.logo-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+
+.logo-text .brand-name {
+  font-weight: 700;
+  font-size: 22px;
+  background: linear-gradient(90deg, var(--brand-accent), var(--brand-accent-strong));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.logo-text .brand-sub {
+  font-size: 12px;
+  letter-spacing: 0.15em;
+  color: var(--text-60);
+  text-transform: lowercase;
+}
+
+/* ─── Hero ───────────────────────────────── */
+
+.hero {
+  padding: 8px 0 32px;
+}
+
+.eyebrow {
+  display: inline-block;
+  color: var(--brand-accent);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin-bottom: 12px;
+}
+
+.hero h1 {
+  font-size: clamp(28px, 4vw, 40px);
+  font-weight: 800;
+  margin: 0 0 12px;
+}
+
+.hero p {
+  color: var(--text-60);
+  font-size: 16px;
+  max-width: 640px;
+  margin: 0;
+}
+
+/* ─── Cards ──────────────────────────────── */
+
+.card {
+  background: var(--brand-surface);
+  border: 1px solid var(--border-accent-15);
+  border-radius: 16px;
+  padding: 24px;
+  margin-bottom: 24px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+}
+
+.card h2 {
+  font-size: 20px;
+  font-weight: 700;
+  margin: 0 0 4px;
+}
+
+.card .card-desc {
+  color: var(--text-60);
+  font-size: 14px;
+  margin: 0 0 20px;
+}
+
+/* ─── Form ───────────────────────────────── */
+
+.path-selector {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.path-option {
+  cursor: pointer;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 12px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.03);
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.path-option input {
+  display: none;
+}
+
+.path-option.active {
+  border-color: var(--brand-accent);
+  background: rgba(45, 205, 132, 0.12);
+  color: var(--brand-accent);
+}
+
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-90);
+}
+
+.field .hint {
+  font-size: 12px;
+  color: var(--text-50);
+  font-weight: 400;
+}
+
+input, select {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-input);
+  border-radius: 8px;
+  color: var(--brand-ink);
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: inherit;
+}
+
+input:hover, select:hover {
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+input:focus, select:focus {
+  outline: none;
+  border-color: var(--brand-accent);
+  box-shadow: 0 0 0 3px rgba(45, 205, 132, 0.15);
+}
+
+/* Rozwijana lista <select> jest renderowana przez system/przeglądarkę i CSS
+   ma nad nią ograniczoną kontrolę — to działa w Chrome/Edge (i pochodnych),
+   nie we wszystkich przeglądarkach, ale pokrywa większość użytkowników. */
+select option {
+  background: var(--brand-surface);
+  color: var(--brand-ink);
+}
+
+input[type="file"] {
+  padding: 8px;
+  font-size: 13px;
+}
+
+/* Natywny przycisk "Wybierz plik" ignoruje kolory input/select powyżej —
+   stylujemy go osobno, żeby był czytelny na ciemnym tle. */
+input[type="file"]::file-selector-button {
+  background: var(--brand-accent);
+  color: var(--brand-night);
+  border: none;
+  border-radius: 6px;
+  padding: 8px 14px;
+  margin-right: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+input[type="file"]::file-selector-button:hover {
+  background: var(--brand-accent-strong);
+}
+
+.file-hidden {
+  display: none;
+}
+
+.section-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--brand-accent);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin: 20px 0 12px;
+}
+
+.installation-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.installation-fields {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.remove-installation-btn {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  margin-top: 22px;
+  border: 1px solid var(--border-input);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-60);
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.remove-installation-btn:hover {
+  border-color: rgba(229, 72, 77, 0.5);
+  color: var(--brand-danger);
+}
+
+.secondary-btn {
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--brand-accent);
+  font-weight: 600;
+  font-size: 13px;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+
+.secondary-btn:hover {
+  border-color: var(--brand-accent);
+  background: rgba(45, 205, 132, 0.08);
+}
+
+.chart-resolution-toggle {
+  display: inline-flex;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-input);
+  border-radius: 8px;
+  padding: 4px;
+  margin-top: 28px;
+}
+
+.chart-resolution-btn {
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-60);
+  font-weight: 600;
+  font-size: 13px;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+
+.chart-resolution-btn.active {
+  background: var(--brand-accent);
+  color: var(--brand-night);
+}
+
+.submit-btn {
+  width: 100%;
+  padding: 16px 40px;
+  border: none;
+  border-radius: 8px;
+  background: var(--brand-accent);
+  color: var(--brand-night);
+  font-weight: 600;
+  font-size: 16px;
+  cursor: pointer;
+  margin-top: 8px;
+  transition: background 0.15s;
+}
+
+.submit-btn:hover:not(:disabled) {
+  background: var(--brand-accent-strong);
+}
+
+.submit-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* ─── Results ────────────────────────────── */
+
+#results {
+  display: none;
+}
+
+.results-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.result-group h3 {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--brand-accent);
+  margin: 0 0 12px;
+}
+
+.stat {
+  margin-bottom: 14px;
+}
+
+.stat .stat-label {
+  font-size: 13px;
+  color: var(--text-60);
+  margin-bottom: 2px;
+}
+
+.stat .stat-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--brand-ink);
+}
+
+.stat .stat-caption {
+  font-size: 12px;
+  color: var(--text-50);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 12px;
+  font-size: 13px;
+}
+
+th, td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+th {
+  color: var(--text-50);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+}
+
+.recommendation-text {
+  white-space: pre-wrap;
+  font-size: 13px;
+  color: var(--text-75);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 16px;
+  margin-top: 16px;
+}
+
+.subsection-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--brand-accent);
+  margin: 28px 0 4px;
+}
+
+.status-msg {
+  font-size: 14px;
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+.status-msg.error {
+  background: rgba(229, 72, 77, 0.12);
+  color: var(--brand-danger);
+  border: 1px solid rgba(229, 72, 77, 0.35);
+}
+
+.status-msg.loading {
+  background: rgba(45, 205, 132, 0.08);
+  color: var(--brand-accent);
+  border: 1px solid var(--border-accent-15);
+}
+
+.disclaimer {
+  font-size: 12px;
+  color: var(--text-40);
+  margin-top: 32px;
+  text-align: center;
+}
+
+.tornado { display: grid; gap: 14px; margin-top: 8px; }
+.tornado-row { display: grid; gap: 4px; }
+.tornado-label { font-size: 14px; color: var(--text-80, #fff); }
+.tornado-track { display: grid; grid-template-columns: 1fr 2px 1fr; align-items: center; height: 18px; }
+.tornado-half { display: flex; flex-direction: column; gap: 2px; height: 100%; justify-content: center; }
+.tornado-half.left { align-items: flex-end; }
+.tornado-half.right { align-items: flex-start; }
+.tornado-axis { background: var(--text-40); height: 100%; }
+.tornado-bar { height: 7px; border-radius: 2px; min-width: 2px; }
+.tornado-bar.pos { background: var(--brand-accent); }
+.tornado-bar.neg { background: var(--brand-danger); }
+.tornado-values { font-size: 12px; color: var(--text-40); }
+
+.checkbox-group { display: grid; gap: 6px; }
+.checkbox-group label { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.checkbox-group input[type="checkbox"] { accent-color: var(--brand-accent); }
+.checkbox-inline { display: flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; white-space: nowrap; }
+.checkbox-inline input[type="checkbox"] { accent-color: var(--brand-accent); width: 16px; height: 16px; flex-shrink: 0; }
+.field--checkbox { justify-content: flex-end; display: flex; flex-direction: column; }
+
+/* ── Autocomplete miejscowości ── */
+.field--city-search { grid-column: span 2; }
+.city-search-wrapper { position: relative; }
+.city-search-wrapper input[type="text"] {
+  width: 100%;
+  background: var(--brand-surface);
+  border: 1px solid var(--border-input);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: var(--text-90);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.city-search-wrapper input[type="text"]:focus { border-color: var(--brand-accent); }
+.city-dropdown {
+  display: none;
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  z-index: 200;
+  background: #0f2318;
+  border: 1px solid var(--border-input);
+  border-radius: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+}
+.city-option {
+  padding: 9px 14px;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text-75);
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+.city-option:last-child { border-bottom: none; }
+.city-option:hover, .city-option.active {
+  background: var(--border-accent-10);
+  color: var(--brand-accent);
+}
+
+.advanced {
+  margin: 8px 0 20px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* Zamknięta sekcja nie zajmuje miejsca — niezależnie od wersji przeglądarki. */
+.advanced:not([open]) > :not(summary) {
+  display: none;
+}
+
+.advanced summary {
+  cursor: pointer;
+  padding: 14px 16px;
+  font-weight: 700;
+  color: var(--brand-accent);
+  list-style: none;
+}
+
+.advanced summary::-webkit-details-marker { display: none; }
+
+.advanced summary::before { content: "▸ "; }
+
+.advanced[open] summary::before { content: "▾ "; }
+
+.advanced-hint {
+  display: block;
+  margin-top: 4px;
+  margin-left: 1.1em;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-50);
+}
+
+.advanced-body { padding: 0 16px 16px; }
+
+.advanced-inst {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 12px;
+  margin-bottom: 8px;
+}
+
+.advanced-inst-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-75);
+  margin-bottom: 8px;
+}
+
+.ac-hint {
+  font-size: 12px;
+  color: var(--text-50);
+  margin: 0 0 8px;
+}
+
+.assumptions-list {
+  margin: 8px 0 16px;
+  padding-left: 18px;
+  color: var(--text-75);
+  font-size: 14px;
+}
+
+.assumptions-list li { margin: 4px 0; }
+
